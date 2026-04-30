@@ -1,0 +1,10 @@
+-- RP-Hub PostgreSQL 初始化授权脚本（仅在“首次初始化数据目录”时执行）
+-- 目标：确保应用用户 rphub 能在 public schema 中创建/修改表。
+
+GRANT ALL PRIVILEGES ON DATABASE rphub TO rphub;
+GRANT USAGE, CREATE ON SCHEMA public TO rphub;
+ALTER SCHEMA public OWNER TO rphub;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO rphub;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO rphub;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO rphub;

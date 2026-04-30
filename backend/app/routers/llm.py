@@ -1,6 +1,7 @@
 """LLM 代理路由：用于解决浏览器直连第三方模型接口的 CORS 与方法差异问题。"""
 
 import json
+import time
 from typing import Any, Dict
 
 import httpx
@@ -159,12 +160,95 @@ async def proxy_chat_completions(request: LLMChatRequest):
                 # 若等待其主动断开会导致前端体感延迟（常见约 60s）。这里在 [DONE] 提前收尾。
                 if "text/event-stream" in content_type:
                     lines: list[str] = []
+                    content_parts: list[str] = []
+                    reasoning_parts: list[str] = []
+                    response_id: str | None = None
+                    response_model: str | None = None
+                    response_created: int | None = None
+                    finish_reason = "stop"
+                    usage_data: dict[str, Any] | None = None
+
                     async for line in upstream.aiter_lines():
                         lines.append(line)
                         stripped = line.strip()
-                        if stripped in ("data: [DONE]", "[DONE]"):
+                        if not stripped or not stripped.startswith("data:"):
+                            continue
+
+                        data_str = stripped[5:].strip()
+                        if data_str in ("[DONE]", "data: [DONE]"):
                             break
 
+                        try:
+                            chunk = json.loads(data_str)
+                        except Exception:  # noqa: BLE001
+                            continue
+
+                        if not isinstance(chunk, dict):
+                            continue
+
+                        if response_id is None and isinstance(chunk.get("id"), str):
+                            response_id = chunk["id"]
+                        if response_model is None and isinstance(chunk.get("model"), str):
+                            response_model = chunk["model"]
+                        if response_created is None and isinstance(chunk.get("created"), int):
+                            response_created = chunk["created"]
+                        if isinstance(chunk.get("usage"), dict):
+                            usage_data = chunk["usage"]
+
+                        choices = chunk.get("choices")
+                        if not isinstance(choices, list) or not choices:
+                            continue
+
+                        first_choice = choices[0]
+                        if not isinstance(first_choice, dict):
+                            continue
+
+                        if isinstance(first_choice.get("finish_reason"), str):
+                            finish_reason = first_choice["finish_reason"]
+
+                        delta = first_choice.get("delta")
+                        if not isinstance(delta, dict):
+                            delta = first_choice.get("message")
+                            if not isinstance(delta, dict):
+                                delta = {}
+
+                        chunk_content = delta.get("content")
+                        if isinstance(chunk_content, str) and chunk_content:
+                            content_parts.append(chunk_content)
+
+                        reasoning_content = delta.get("reasoning_content")
+                        if isinstance(reasoning_content, str) and reasoning_content:
+                            reasoning_parts.append(reasoning_content)
+
+                        choice_text = first_choice.get("text")
+                        if isinstance(choice_text, str) and choice_text:
+                            content_parts.append(choice_text)
+
+                    aggregated_content = "".join(content_parts)
+                    aggregated_reasoning = "".join(reasoning_parts)
+                    if aggregated_content or aggregated_reasoning:
+                        payload_json: Dict[str, Any] = {
+                            "id": response_id or f"chatcmpl-proxy-{int(time.time())}",
+                            "object": "chat.completion",
+                            "created": response_created or int(time.time()),
+                            "model": response_model or payload.get("model", "unknown"),
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "message": {
+                                        "role": "assistant",
+                                        "content": aggregated_content,
+                                        "reasoning_content": aggregated_reasoning,
+                                    },
+                                    "finish_reason": finish_reason or "stop",
+                                }
+                            ],
+                        }
+                        if isinstance(usage_data, dict):
+                            payload_json["usage"] = usage_data
+                        return JSONResponse(content=payload_json, status_code=upstream.status_code)
+
+                    # 如果聚合失败，回退为纯文本 SSE，保留旧前端兜底解析路径。
                     sse_text = "\n".join(lines)
                     return Response(
                         content=sse_text,

@@ -1,8 +1,9 @@
 """路由包导出：集中管理 API Router。"""
 
 from .domain import router as domain_router
+from .llm import router as llm_router
 from .memory import router as memory_router
 from .plugins import router as plugins_router
 from .storage import router as storage_router
 
-__all__ = ["storage_router", "memory_router", "plugins_router", "domain_router"]
+__all__ = ["storage_router", "memory_router", "plugins_router", "domain_router", "llm_router"]

@@ -784,11 +784,30 @@ createApp({
 
         const fetchWithTimeout = async (url, options = {}, timeout = 8000) => {
             const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), timeout);
+            const externalSignal = options.signal || null;
+            let onExternalAbort = null;
+
+            if (externalSignal) {
+                if (externalSignal.aborted) {
+                    controller.abort();
+                } else {
+                    onExternalAbort = () => controller.abort();
+                    externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+                }
+            }
+
+            const hasTimeout = Number.isFinite(timeout) && timeout > 0;
+            const timer = hasTimeout ? setTimeout(() => controller.abort(), timeout) : null;
+            const requestOptions = { ...options };
+            delete requestOptions.signal;
+
             try {
-                return await fetch(url, { ...options, signal: controller.signal });
+                return await fetch(url, { ...requestOptions, signal: controller.signal });
             } finally {
-                clearTimeout(timer);
+                if (timer) clearTimeout(timer);
+                if (externalSignal && onExternalAbort) {
+                    externalSignal.removeEventListener('abort', onExternalAbort);
+                }
             }
         };
 
@@ -805,6 +824,83 @@ createApp({
             return fetchWithTimeout(`${baseUrl}${path}`, {
                 ...init,
                 headers
+            }, timeout);
+        };
+
+        // --- LLM Request Helpers ---
+        // 作用：优先走后端代理，避免浏览器直连第三方模型接口导致 CORS / 405 问题。
+        const normalizeProviderApiUrl = () => {
+            let base = (settings.apiUrl || '').trim().replace(/\/+$/, '');
+            const stripSuffixes = ['/v1/chat/completions', '/chat/completions', '/v1/models', '/models'];
+            for (const suffix of stripSuffixes) {
+                if (base.endsWith(suffix)) {
+                    base = base.slice(0, -suffix.length);
+                    break;
+                }
+            }
+            return base;
+        };
+
+        const buildProviderEndpoint = (endpoint) => {
+            const normalizedEndpoint = (endpoint || '').replace(/^\/+/, '');
+            const base = normalizeProviderApiUrl();
+            if (!base) throw new Error('未配置模型 API 地址');
+            return base.endsWith('/v1') ? `${base}/${normalizedEndpoint}` : `${base}/v1/${normalizedEndpoint}`;
+        };
+
+        const directLlmHeaders = (withJson = true) => {
+            const headers = {};
+            if (withJson) headers['Content-Type'] = 'application/json';
+            if ((settings.apiKey || '').trim()) {
+                headers['Authorization'] = `Bearer ${settings.apiKey.trim()}`;
+            }
+            return headers;
+        };
+
+        const shouldUseLlmProxy = () => {
+            if (settings.storageMode === 'local') return false;
+            return !!normalizeBackendApiUrl();
+        };
+
+        const requestLlmModels = async (signal = null) => {
+            if (shouldUseLlmProxy()) {
+                return apiRequest('/api/llm/models', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        api_url: settings.apiUrl,
+                        api_key: settings.apiKey
+                    }),
+                    signal
+                }, 12000);
+            }
+
+            const url = buildProviderEndpoint('models');
+            return fetchWithTimeout(url, {
+                method: 'GET',
+                headers: directLlmHeaders(false),
+                signal
+            }, 12000);
+        };
+
+        const requestLlmChatCompletions = async (payload, signal = null, timeout = 0) => {
+            if (shouldUseLlmProxy()) {
+                return apiRequest('/api/llm/chat/completions', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        api_url: settings.apiUrl,
+                        api_key: settings.apiKey,
+                        payload
+                    }),
+                    signal
+                }, timeout);
+            }
+
+            const url = buildProviderEndpoint('chat/completions');
+            return fetchWithTimeout(url, {
+                method: 'POST',
+                headers: directLlmHeaders(true),
+                body: JSON.stringify(payload),
+                signal
             }, timeout);
         };
 
@@ -1396,19 +1492,11 @@ createApp({
                 }));
                 msgs.push({ role: 'user', content: prompt });
 
-                const url = settings.apiUrl.endsWith('/v1') ? `${settings.apiUrl}/chat/completions` : `${settings.apiUrl}/v1/chat/completions`;
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${settings.apiKey}`
-                    },
-                    body: JSON.stringify({
-                        model: settings.suggestionModel,
-                        messages: msgs,
-                        temperature: 1
-                    })
-                });
+                const response = await requestLlmChatCompletions({
+                    model: settings.suggestionModel,
+                    messages: msgs,
+                    temperature: 1
+                }, null, 45000);
 
                 if (!response.ok) throw new Error('API request failed');
                 const data = await response.json();
@@ -2352,13 +2440,20 @@ ${rawHtml}
         const fetchModels = async (isManual = false) => {
             try {
                 if (isManual) showToast('正在获取模型列表...', 'info');
-                const url = settings.apiUrl.endsWith('/v1') ? `${settings.apiUrl}/models` : `${settings.apiUrl}/v1/models`;
-                const response = await fetch(url, {
-                    headers: { 'Authorization': `Bearer ${settings.apiKey}` }
-                });
-                if (!response.ok) throw new Error('Failed to fetch models');
+                const response = await requestLlmModels();
+                if (!response.ok) {
+                    if (response.status === 404 || response.status === 405) {
+                        availableModels.value = [];
+                        if (isManual) showToast('当前模型服务不支持 /models，已跳过模型列表', 'warning');
+                        return;
+                    }
+                    throw new Error(`Failed to fetch models (${response.status})`);
+                }
                 const data = await response.json();
                 availableModels.value = data.data || [];
+                if (data.warning && isManual) {
+                    showToast(data.warning, 'warning');
+                }
                 if (isManual) showToast(`成功获取 ${availableModels.value.length} 个模型`, 'success');
             } catch (error) {
                 console.error(error);
@@ -2400,15 +2495,11 @@ ${rawHtml}
                 const id = setTimeout(() => controller.abort(), 10000);
                 const startTime = performance.now();
 
-                const url = settings.apiUrl.endsWith('/v1') ? `${settings.apiUrl}/models` : `${settings.apiUrl}/v1/models`;
-                const response = await fetch(url, {
-                    headers: { 'Authorization': `Bearer ${settings.apiKey}` },
-                    signal: controller.signal
-                });
+                const response = await requestLlmModels(controller.signal);
                 clearTimeout(id);
                 const endTime = performance.now();
 
-                if (response.ok) {
+                if (response.ok || response.status === 404 || response.status === 405) {
                     apiStatus.value = 'connected';
                     apiLatency.value = Math.round(endTime - startTime);
                 } else {
@@ -3511,21 +3602,12 @@ ${rawHtml}
                     let responseContent = '';
 
                     try {
-                        const url = settings.apiUrl.endsWith('/v1') ? `${settings.apiUrl}/chat/completions` : `${settings.apiUrl}/v1/chat/completions`;
-                        const response = await fetch(url, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${settings.apiKey}`
-                            },
-                            body: JSON.stringify({
-                                model: settings.model,
-                                messages: messages,
-                                temperature: settings.temperature,
-                                stream: settings.stream
-                            }),
-                            signal: abortController.value.signal
-                        });
+                        const response = await requestLlmChatCompletions({
+                            model: settings.model,
+                            messages: messages,
+                            temperature: settings.temperature,
+                            stream: settings.stream
+                        }, abortController.value.signal, 0);
 
                         if (!response.ok) {
                             let errorMsg = `API Error: ${response.status}`;
@@ -3932,27 +4014,18 @@ summary 长度控制在300-500字，尽量完全详细。
 [{"category":"event","summary":"突然下起暴雨，爱丽丝拉着李明在雨中并肩跑过街道，两人一起躲进了路边的废弃教堂，遇到了教堂守夜人，爱丽丝向守夜人询问借宿事宜","time":"傍晚","location":"旧城区街道","npcs":["爱丽丝", "李明", "教堂守夜人"]},{"category":"state","summary":"爱丽丝因淋雨导致体温偏低，身体微微发抖"},{"category":"relationship","summary":"爱丽丝对李明的好感和信赖感明显加深"}]`;
 
             const memoryModel = memorySettings.model || settings.fastModel || settings.model;
-            const url = settings.apiUrl.endsWith('/v1') ? `${settings.apiUrl}/chat/completions` : `${settings.apiUrl}/v1/chat/completions`;
 
             console.log('--- 发送给 AI 的记忆提取 Prompt ---');
             console.log(systemPrompt);
 
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${settings.apiKey}`
-                },
-                body: JSON.stringify({
-                    model: memoryModel,
-                    messages: [
-                        { role: 'system', content: systemPrompt },
-                        { role: 'user', content: '请开始根据以上规则提取记忆，严格遵循JSON数组格式返回，属性值内部严禁使用双引号，不要附带任何解释。' }
-                    ],
-                    temperature: 0.3
-                }),
-                signal: signal
-            });
+            const response = await requestLlmChatCompletions({
+                model: memoryModel,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: '请开始根据以上规则提取记忆，严格遵循JSON数组格式返回，属性值内部严禁使用双引号，不要附带任何解释。' }
+                ],
+                temperature: 0.3
+            }, signal, 120000);
 
             if (!response.ok) throw new Error(`Memory API Error: ${response.status}`);
             const data = await response.json();

@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import get_settings
 from .db import engine
 from .models import Base
-from .routers import domain_router, memory_router, plugins_router, storage_router
+from .routers import domain_router, llm_router, memory_router, plugins_router, storage_router
 
 settings = get_settings()
 
@@ -55,6 +55,7 @@ app.include_router(storage_router)
 app.include_router(memory_router)
 app.include_router(plugins_router)
 app.include_router(domain_router)
+app.include_router(llm_router)
 
 # 前端静态资源根目录（RP-Hub 项目根目录）
 FRONTEND_ROOT = Path(__file__).resolve().parents[2]

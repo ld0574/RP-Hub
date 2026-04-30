@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Header
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import Character, ChatMessage, ChatSession, MemoryRecord
+from ..models import AppKV, Character, ChatMessage, ChatSession, MemoryRecord
 from ..schemas import (
     CharacterBulkRequest,
     CharacterBulkResponse,
@@ -55,6 +55,13 @@ def get_characters(
         if not raw.get("uuid"):
             raw["uuid"] = row.id
         items.append(raw)
+
+    # 兼容迁移：若规范化表为空，回读旧 app_kv 数据，避免前端出现“空角色”。
+    if not items:
+        kv = db.query(AppKV).filter(AppKV.namespace == namespace, AppKV.key == "silly_tavern_characters").one_or_none()
+        if kv and isinstance(kv.value, list):
+            return CharacterBulkResponse(items=kv.value)
+
     return CharacterBulkResponse(items=items)
 
 
@@ -137,6 +144,12 @@ def get_chat_messages(
         if row.reasoning:
             msg["reasoning"] = row.reasoning
         messages.append(msg)
+
+    if not messages:
+        kv_key = f"silly_tavern_chat_{character_id}"
+        kv = db.query(AppKV).filter(AppKV.namespace == namespace, AppKV.key == kv_key).one_or_none()
+        if kv and isinstance(kv.value, list):
+            return ChatBulkResponse(messages=kv.value)
 
     return ChatBulkResponse(messages=messages)
 
@@ -234,6 +247,12 @@ def get_memories(
                 if not item.get("id"):
                     item["id"] = row.id
         items.append(item)
+
+    if not items:
+        kv_key = f"silly_tavern_memories_{character_id}"
+        kv = db.query(AppKV).filter(AppKV.namespace == namespace, AppKV.key == kv_key).one_or_none()
+        if kv and isinstance(kv.value, list):
+            return MemoryBulkResponse(items=kv.value)
 
     return MemoryBulkResponse(items=items)
 

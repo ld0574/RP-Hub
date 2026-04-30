@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 import httpx
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/llm", tags=["llm-proxy"])
@@ -143,17 +143,50 @@ async def proxy_chat_completions(request: LLMChatRequest):
 
     try:
         async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-            response = await client.post(url, headers=headers, json=payload)
+            async with client.stream("POST", url, headers=headers, json=payload) as upstream:
+                if not upstream.is_success:
+                    error_bytes = await upstream.aread()
+                    error_text = error_bytes.decode("utf-8", errors="ignore").strip()
+                    raise HTTPException(
+                        status_code=upstream.status_code,
+                        detail=error_text[:1000] or f"HTTP {upstream.status_code}",
+                    )
+
+                content_type_raw = upstream.headers.get("content-type") or ""
+                content_type = content_type_raw.lower()
+
+                # 兼容：部分上游即使 stream=false 也返回 SSE，并在 [DONE] 后保持连接，
+                # 若等待其主动断开会导致前端体感延迟（常见约 60s）。这里在 [DONE] 提前收尾。
+                if "text/event-stream" in content_type:
+                    lines: list[str] = []
+                    async for line in upstream.aiter_lines():
+                        lines.append(line)
+                        stripped = line.strip()
+                        if stripped in ("data: [DONE]", "[DONE]"):
+                            break
+
+                    sse_text = "\n".join(lines)
+                    return Response(
+                        content=sse_text,
+                        status_code=upstream.status_code,
+                        headers={"Content-Type": "text/plain; charset=utf-8"},
+                    )
+
+                body_bytes = await upstream.aread()
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"上游连接失败: {exc}") from exc
 
-    content_type = (response.headers.get("content-type") or "").lower()
     if "application/json" in content_type:
         try:
-            payload_json: Dict[str, Any] = response.json()
+            payload_json = json.loads(body_bytes)
+            return JSONResponse(content=payload_json, status_code=upstream.status_code)
         except Exception:  # noqa: BLE001
-            payload_json = {"text": response.text}
-    else:
-        payload_json = {"text": response.text}
+            pass
 
-    return JSONResponse(content=payload_json, status_code=response.status_code)
+    return Response(
+        content=body_bytes,
+        status_code=upstream.status_code,
+        headers={"Content-Type": content_type_raw or "text/plain; charset=utf-8"},
+    )

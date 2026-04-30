@@ -878,6 +878,39 @@ createApp({
                 return;
             }
 
+            if (key === 'silly_tavern_presets') {
+                const response = await apiRequest('/api/domain/presets', {
+                    method: 'PUT',
+                    body: JSON.stringify({ items: Array.isArray(value) ? value : [] })
+                });
+                if (!response.ok) {
+                    throw new Error(`Remote presets set failed: ${response.status}`);
+                }
+                return;
+            }
+
+            if (key === 'silly_tavern_regex') {
+                const response = await apiRequest('/api/domain/regex', {
+                    method: 'PUT',
+                    body: JSON.stringify({ items: Array.isArray(value) ? value : [] })
+                });
+                if (!response.ok) {
+                    throw new Error(`Remote regex set failed: ${response.status}`);
+                }
+                return;
+            }
+
+            if (key === 'silly_tavern_worldinfo') {
+                const response = await apiRequest('/api/domain/worldinfo', {
+                    method: 'PUT',
+                    body: JSON.stringify({ items: Array.isArray(value) ? value : [] })
+                });
+                if (!response.ok) {
+                    throw new Error(`Remote worldinfo set failed: ${response.status}`);
+                }
+                return;
+            }
+
             const response = await apiRequest(`/api/storage/${encodeURIComponent(key)}`, {
                 method: 'PUT',
                 body: JSON.stringify({ value })
@@ -917,6 +950,33 @@ createApp({
                 return Array.isArray(data.items) ? data.items : [];
             }
 
+            if (key === 'silly_tavern_presets') {
+                const response = await apiRequest('/api/domain/presets', { method: 'GET' });
+                if (!response.ok) {
+                    throw new Error(`Remote presets get failed: ${response.status}`);
+                }
+                const data = await response.json();
+                return Array.isArray(data.items) ? data.items : [];
+            }
+
+            if (key === 'silly_tavern_regex') {
+                const response = await apiRequest('/api/domain/regex', { method: 'GET' });
+                if (!response.ok) {
+                    throw new Error(`Remote regex get failed: ${response.status}`);
+                }
+                const data = await response.json();
+                return Array.isArray(data.items) ? data.items : [];
+            }
+
+            if (key === 'silly_tavern_worldinfo') {
+                const response = await apiRequest('/api/domain/worldinfo', { method: 'GET' });
+                if (!response.ok) {
+                    throw new Error(`Remote worldinfo get failed: ${response.status}`);
+                }
+                const data = await response.json();
+                return Array.isArray(data.items) ? data.items : [];
+            }
+
             const response = await apiRequest(`/api/storage/${encodeURIComponent(key)}`, { method: 'GET' });
             if (!response.ok) {
                 throw new Error(`Remote storage get failed: ${response.status}`);
@@ -940,6 +1000,30 @@ createApp({
                 const response = await apiRequest(`/api/domain/memories/${encodeURIComponent(characterId)}`, { method: 'DELETE' });
                 if (!response.ok) {
                     throw new Error(`Remote memories delete failed: ${response.status}`);
+                }
+                return;
+            }
+
+            if (key === 'silly_tavern_presets') {
+                const response = await apiRequest('/api/domain/presets', { method: 'DELETE' });
+                if (!response.ok) {
+                    throw new Error(`Remote presets delete failed: ${response.status}`);
+                }
+                return;
+            }
+
+            if (key === 'silly_tavern_regex') {
+                const response = await apiRequest('/api/domain/regex', { method: 'DELETE' });
+                if (!response.ok) {
+                    throw new Error(`Remote regex delete failed: ${response.status}`);
+                }
+                return;
+            }
+
+            if (key === 'silly_tavern_worldinfo') {
+                const response = await apiRequest('/api/domain/worldinfo', { method: 'DELETE' });
+                if (!response.ok) {
+                    throw new Error(`Remote worldinfo delete failed: ${response.status}`);
                 }
                 return;
             }

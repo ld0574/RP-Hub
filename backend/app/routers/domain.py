@@ -8,7 +8,16 @@ from fastapi import APIRouter, Depends, Header
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import AppKV, Character, ChatMessage, ChatSession, MemoryRecord
+from ..models import (
+    AppKV,
+    Character,
+    ChatMessage,
+    ChatSession,
+    MemoryRecord,
+    PresetRecord,
+    RegexRecord,
+    WorldInfoRecord,
+)
 from ..schemas import (
     CharacterBulkRequest,
     CharacterBulkResponse,
@@ -16,6 +25,12 @@ from ..schemas import (
     ChatBulkResponse,
     MemoryBulkRequest,
     MemoryBulkResponse,
+    PresetBulkRequest,
+    PresetBulkResponse,
+    RegexBulkRequest,
+    RegexBulkResponse,
+    WorldInfoBulkRequest,
+    WorldInfoBulkResponse,
 )
 from .storage import resolve_namespace
 
@@ -27,6 +42,21 @@ def _safe_str(value: Any, default: str = "") -> str:
     if value is None:
         return default
     return str(value)
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    """安全整数转换。"""
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _safe_list(value: Any, default: Optional[List[Any]] = None) -> List[Any]:
+    """安全列表转换。"""
+    if isinstance(value, list):
+        return value
+    return default[:] if default is not None else []
 
 
 @router.get("/characters", response_model=CharacterBulkResponse)
@@ -309,5 +339,269 @@ def delete_memories(
     db.query(MemoryRecord).filter(MemoryRecord.namespace == namespace, MemoryRecord.character_id == character_id).delete(
         synchronize_session=False
     )
+    db.commit()
+    return {"deleted": True}
+
+
+@router.get("/presets", response_model=PresetBulkResponse)
+def get_presets(
+    db: Session = Depends(get_db),
+    x_rph_user: Optional[str] = Header(default=None),
+):
+    """读取预设列表。"""
+    namespace = resolve_namespace(x_rph_user)
+    rows = (
+        db.query(PresetRecord)
+        .filter(PresetRecord.namespace == namespace)
+        .order_by(PresetRecord.order_no.asc(), PresetRecord.created_at.asc())
+        .all()
+    )
+
+    items: List[Dict[str, Any]] = []
+    for row in rows:
+        raw = dict(row.meta or {}).get("raw") if isinstance(row.meta, dict) else None
+        if isinstance(raw, dict):
+            items.append(raw)
+            continue
+        items.append(
+            {
+                "id": row.id,
+                "name": row.name,
+                "content": row.content,
+                "enabled": row.enabled,
+                "order": row.order_no,
+            }
+        )
+
+    if not items:
+        kv = db.query(AppKV).filter(AppKV.namespace == namespace, AppKV.key == "silly_tavern_presets").one_or_none()
+        if kv and isinstance(kv.value, list):
+            return PresetBulkResponse(items=kv.value)
+
+    return PresetBulkResponse(items=items)
+
+
+@router.put("/presets", response_model=PresetBulkResponse)
+def put_presets(
+    request: PresetBulkRequest,
+    db: Session = Depends(get_db),
+    x_rph_user: Optional[str] = Header(default=None),
+):
+    """全量替换预设列表。"""
+    namespace = resolve_namespace(x_rph_user)
+    db.query(PresetRecord).filter(PresetRecord.namespace == namespace).delete(synchronize_session=False)
+
+    normalized: List[Dict[str, Any]] = []
+    for idx, item in enumerate(request.items):
+        item_id = _safe_str(item.get("id"), "") or str(uuid.uuid4())
+        normalized_item = dict(item)
+        normalized_item["id"] = item_id
+        row = PresetRecord(
+            id=item_id,
+            namespace=namespace,
+            name=_safe_str(item.get("name"), f"Preset {idx + 1}"),
+            content=_safe_str(item.get("content"), ""),
+            enabled=bool(item.get("enabled", True)),
+            order_no=_safe_int(item.get("order"), idx),
+            meta={"raw": normalized_item},
+        )
+        db.add(row)
+        normalized.append(normalized_item)
+
+    db.commit()
+    return PresetBulkResponse(items=normalized)
+
+
+@router.delete("/presets")
+def delete_presets(
+    db: Session = Depends(get_db),
+    x_rph_user: Optional[str] = Header(default=None),
+):
+    """删除预设列表。"""
+    namespace = resolve_namespace(x_rph_user)
+    db.query(PresetRecord).filter(PresetRecord.namespace == namespace).delete(synchronize_session=False)
+    db.commit()
+    return {"deleted": True}
+
+
+@router.get("/regex", response_model=RegexBulkResponse)
+def get_regex_records(
+    db: Session = Depends(get_db),
+    x_rph_user: Optional[str] = Header(default=None),
+):
+    """读取正则脚本列表。"""
+    namespace = resolve_namespace(x_rph_user)
+    rows = (
+        db.query(RegexRecord)
+        .filter(RegexRecord.namespace == namespace)
+        .order_by(RegexRecord.order_no.asc(), RegexRecord.created_at.asc())
+        .all()
+    )
+
+    items: List[Dict[str, Any]] = []
+    for row in rows:
+        raw = dict(row.meta or {}).get("raw") if isinstance(row.meta, dict) else None
+        if isinstance(raw, dict):
+            items.append(raw)
+            continue
+        items.append(
+            {
+                "id": row.id,
+                "name": row.name,
+                "regex": row.regex,
+                "flags": row.flags or "",
+                "replacement": row.replacement or "",
+                "placement": row.placement or [1, 2],
+                "markdownOnly": row.markdown_only,
+                "promptOnly": row.prompt_only,
+                "enabled": row.enabled,
+                "order": row.order_no,
+            }
+        )
+
+    if not items:
+        kv = db.query(AppKV).filter(AppKV.namespace == namespace, AppKV.key == "silly_tavern_regex").one_or_none()
+        if kv and isinstance(kv.value, list):
+            return RegexBulkResponse(items=kv.value)
+
+    return RegexBulkResponse(items=items)
+
+
+@router.put("/regex", response_model=RegexBulkResponse)
+def put_regex_records(
+    request: RegexBulkRequest,
+    db: Session = Depends(get_db),
+    x_rph_user: Optional[str] = Header(default=None),
+):
+    """全量替换正则脚本列表。"""
+    namespace = resolve_namespace(x_rph_user)
+    db.query(RegexRecord).filter(RegexRecord.namespace == namespace).delete(synchronize_session=False)
+
+    normalized: List[Dict[str, Any]] = []
+    for idx, item in enumerate(request.items):
+        item_id = _safe_str(item.get("id"), "") or str(uuid.uuid4())
+        normalized_item = dict(item)
+        normalized_item["id"] = item_id
+
+        row = RegexRecord(
+            id=item_id,
+            namespace=namespace,
+            name=_safe_str(item.get("name"), f"Regex {idx + 1}"),
+            regex=_safe_str(item.get("regex"), ""),
+            flags=_safe_str(item.get("flags"), ""),
+            replacement=_safe_str(item.get("replacement"), ""),
+            placement=_safe_list(item.get("placement"), [1, 2]),
+            markdown_only=bool(item.get("markdownOnly", item.get("markdown_only", False))),
+            prompt_only=bool(item.get("promptOnly", item.get("prompt_only", False))),
+            enabled=bool(item.get("enabled", True)),
+            order_no=_safe_int(item.get("order"), idx),
+            meta={"raw": normalized_item},
+        )
+        db.add(row)
+        normalized.append(normalized_item)
+
+    db.commit()
+    return RegexBulkResponse(items=normalized)
+
+
+@router.delete("/regex")
+def delete_regex_records(
+    db: Session = Depends(get_db),
+    x_rph_user: Optional[str] = Header(default=None),
+):
+    """删除正则脚本列表。"""
+    namespace = resolve_namespace(x_rph_user)
+    db.query(RegexRecord).filter(RegexRecord.namespace == namespace).delete(synchronize_session=False)
+    db.commit()
+    return {"deleted": True}
+
+
+@router.get("/worldinfo", response_model=WorldInfoBulkResponse)
+def get_worldinfo_records(
+    db: Session = Depends(get_db),
+    x_rph_user: Optional[str] = Header(default=None),
+):
+    """读取世界书条目列表。"""
+    namespace = resolve_namespace(x_rph_user)
+    rows = (
+        db.query(WorldInfoRecord)
+        .filter(WorldInfoRecord.namespace == namespace)
+        .order_by(WorldInfoRecord.order_no.asc(), WorldInfoRecord.created_at.asc())
+        .all()
+    )
+
+    items: List[Dict[str, Any]] = []
+    for row in rows:
+        raw = dict(row.meta or {}).get("raw") if isinstance(row.meta, dict) else None
+        if isinstance(raw, dict):
+            items.append(raw)
+            continue
+        items.append(
+            {
+                "id": row.id,
+                "comment": row.name,
+                "content": row.content,
+                "position": row.position,
+                "depth": row.depth,
+                "order": row.order_no,
+                "enabled": row.enabled,
+                "keys": row.keys or [],
+                "secondary_keys": row.secondary_keys or [],
+            }
+        )
+
+    if not items:
+        kv = db.query(AppKV).filter(AppKV.namespace == namespace, AppKV.key == "silly_tavern_worldinfo").one_or_none()
+        if kv and isinstance(kv.value, list):
+            return WorldInfoBulkResponse(items=kv.value)
+
+    return WorldInfoBulkResponse(items=items)
+
+
+@router.put("/worldinfo", response_model=WorldInfoBulkResponse)
+def put_worldinfo_records(
+    request: WorldInfoBulkRequest,
+    db: Session = Depends(get_db),
+    x_rph_user: Optional[str] = Header(default=None),
+):
+    """全量替换世界书条目列表。"""
+    namespace = resolve_namespace(x_rph_user)
+    db.query(WorldInfoRecord).filter(WorldInfoRecord.namespace == namespace).delete(synchronize_session=False)
+
+    normalized: List[Dict[str, Any]] = []
+    for idx, item in enumerate(request.items):
+        item_id = _safe_str(item.get("id"), "") or str(uuid.uuid4())
+        normalized_item = dict(item)
+        normalized_item["id"] = item_id
+
+        row = WorldInfoRecord(
+            id=item_id,
+            namespace=namespace,
+            character_id=_safe_str(item.get("character_id"), "") or None,
+            name=_safe_str(item.get("comment"), _safe_str(item.get("name"), f"WorldInfo {idx + 1}")),
+            content=_safe_str(item.get("content"), ""),
+            position=_safe_str(item.get("position"), "at_depth"),
+            depth=_safe_int(item.get("depth"), 4),
+            order_no=_safe_int(item.get("order"), idx),
+            enabled=bool(item.get("enabled", True)),
+            keys=_safe_list(item.get("keys")),
+            secondary_keys=_safe_list(item.get("secondary_keys", item.get("secondaryKeys"))),
+            meta={"raw": normalized_item},
+        )
+        db.add(row)
+        normalized.append(normalized_item)
+
+    db.commit()
+    return WorldInfoBulkResponse(items=normalized)
+
+
+@router.delete("/worldinfo")
+def delete_worldinfo_records(
+    db: Session = Depends(get_db),
+    x_rph_user: Optional[str] = Header(default=None),
+):
+    """删除世界书条目列表。"""
+    namespace = resolve_namespace(x_rph_user)
+    db.query(WorldInfoRecord).filter(WorldInfoRecord.namespace == namespace).delete(synchronize_session=False)
     db.commit()
     return {"deleted": True}

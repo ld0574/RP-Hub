@@ -137,3 +137,39 @@ class MemoryBulkResponse(BaseModel):
     """记忆批量读取响应。"""
 
     items: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class PresetBulkRequest(BaseModel):
+    """预设批量写入请求。"""
+
+    items: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class PresetBulkResponse(BaseModel):
+    """预设批量读取响应。"""
+
+    items: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class RegexBulkRequest(BaseModel):
+    """正则脚本批量写入请求。"""
+
+    items: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class RegexBulkResponse(BaseModel):
+    """正则脚本批量读取响应。"""
+
+    items: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class WorldInfoBulkRequest(BaseModel):
+    """世界书条目批量写入请求。"""
+
+    items: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class WorldInfoBulkResponse(BaseModel):
+    """世界书条目批量读取响应。"""
+
+    items: List[Dict[str, Any]] = Field(default_factory=list)

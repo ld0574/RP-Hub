@@ -33,6 +33,9 @@ uvicorn app.main:app --reload --port 8000
 - `PUT /api/domain/characters` / `GET /api/domain/characters`：角色规范化表读写
 - `PUT /api/domain/chat/{character_id}` / `GET /api/domain/chat/{character_id}`：聊天消息规范化表读写
 - `PUT /api/domain/memories/{character_id}` / `GET /api/domain/memories/{character_id}`：记忆规范化表读写
+- `PUT /api/domain/presets` / `GET /api/domain/presets`：预设规范化表读写
+- `PUT /api/domain/regex` / `GET /api/domain/regex`：正则脚本规范化表读写
+- `PUT /api/domain/worldinfo` / `GET /api/domain/worldinfo`：世界书规范化表读写
 - `POST /api/memory/upsert`：写入记忆向量到 Qdrant
 - `POST /api/memory/search`：向量检索记忆
 - `GET /api/plugins`：列出插件

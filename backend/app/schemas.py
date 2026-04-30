@@ -101,3 +101,39 @@ class PluginInvokeResponse(BaseModel):
     ok: bool
     output: Dict[str, Any] = Field(default_factory=dict)
     error: Optional[str] = None
+
+
+class CharacterBulkRequest(BaseModel):
+    """角色批量写入请求。"""
+
+    items: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class CharacterBulkResponse(BaseModel):
+    """角色批量读取响应。"""
+
+    items: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class ChatBulkRequest(BaseModel):
+    """聊天消息批量写入请求。"""
+
+    messages: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class ChatBulkResponse(BaseModel):
+    """聊天消息批量读取响应。"""
+
+    messages: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class MemoryBulkRequest(BaseModel):
+    """记忆批量写入请求。"""
+
+    items: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class MemoryBulkResponse(BaseModel):
+    """记忆批量读取响应。"""
+
+    items: List[Dict[str, Any]] = Field(default_factory=list)

@@ -843,6 +843,41 @@ createApp({
         };
 
         const remoteDbSet = async (key, value) => {
+            if (key === 'silly_tavern_characters') {
+                const response = await apiRequest('/api/domain/characters', {
+                    method: 'PUT',
+                    body: JSON.stringify({ items: Array.isArray(value) ? value : [] })
+                });
+                if (!response.ok) {
+                    throw new Error(`Remote characters set failed: ${response.status}`);
+                }
+                return;
+            }
+
+            if (key.startsWith('silly_tavern_chat_')) {
+                const characterId = key.replace('silly_tavern_chat_', '');
+                const response = await apiRequest(`/api/domain/chat/${encodeURIComponent(characterId)}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ messages: Array.isArray(value) ? value : [] })
+                });
+                if (!response.ok) {
+                    throw new Error(`Remote chat set failed: ${response.status}`);
+                }
+                return;
+            }
+
+            if (key.startsWith('silly_tavern_memories_')) {
+                const characterId = key.replace('silly_tavern_memories_', '');
+                const response = await apiRequest(`/api/domain/memories/${encodeURIComponent(characterId)}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ items: Array.isArray(value) ? value : [] })
+                });
+                if (!response.ok) {
+                    throw new Error(`Remote memories set failed: ${response.status}`);
+                }
+                return;
+            }
+
             const response = await apiRequest(`/api/storage/${encodeURIComponent(key)}`, {
                 method: 'PUT',
                 body: JSON.stringify({ value })
@@ -853,6 +888,35 @@ createApp({
         };
 
         const remoteDbGet = async (key) => {
+            if (key === 'silly_tavern_characters') {
+                const response = await apiRequest('/api/domain/characters', { method: 'GET' });
+                if (!response.ok) {
+                    throw new Error(`Remote characters get failed: ${response.status}`);
+                }
+                const data = await response.json();
+                return Array.isArray(data.items) ? data.items : [];
+            }
+
+            if (key.startsWith('silly_tavern_chat_')) {
+                const characterId = key.replace('silly_tavern_chat_', '');
+                const response = await apiRequest(`/api/domain/chat/${encodeURIComponent(characterId)}`, { method: 'GET' });
+                if (!response.ok) {
+                    throw new Error(`Remote chat get failed: ${response.status}`);
+                }
+                const data = await response.json();
+                return Array.isArray(data.messages) ? data.messages : [];
+            }
+
+            if (key.startsWith('silly_tavern_memories_')) {
+                const characterId = key.replace('silly_tavern_memories_', '');
+                const response = await apiRequest(`/api/domain/memories/${encodeURIComponent(characterId)}`, { method: 'GET' });
+                if (!response.ok) {
+                    throw new Error(`Remote memories get failed: ${response.status}`);
+                }
+                const data = await response.json();
+                return Array.isArray(data.items) ? data.items : [];
+            }
+
             const response = await apiRequest(`/api/storage/${encodeURIComponent(key)}`, { method: 'GET' });
             if (!response.ok) {
                 throw new Error(`Remote storage get failed: ${response.status}`);
@@ -862,6 +926,24 @@ createApp({
         };
 
         const remoteDbDelete = async (key) => {
+            if (key.startsWith('silly_tavern_chat_')) {
+                const characterId = key.replace('silly_tavern_chat_', '');
+                const response = await apiRequest(`/api/domain/chat/${encodeURIComponent(characterId)}`, { method: 'DELETE' });
+                if (!response.ok) {
+                    throw new Error(`Remote chat delete failed: ${response.status}`);
+                }
+                return;
+            }
+
+            if (key.startsWith('silly_tavern_memories_')) {
+                const characterId = key.replace('silly_tavern_memories_', '');
+                const response = await apiRequest(`/api/domain/memories/${encodeURIComponent(characterId)}`, { method: 'DELETE' });
+                if (!response.ok) {
+                    throw new Error(`Remote memories delete failed: ${response.status}`);
+                }
+                return;
+            }
+
             const response = await apiRequest(`/api/storage/${encodeURIComponent(key)}`, { method: 'DELETE' });
             if (!response.ok) {
                 throw new Error(`Remote storage delete failed: ${response.status}`);

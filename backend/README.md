@@ -30,6 +30,9 @@ uvicorn app.main:app --reload --port 8000
 - `PUT /api/storage/{key}`：写入任意 JSON（前端主存储）
 - `GET /api/storage/{key}`：读取 JSON
 - `DELETE /api/storage/{key}`：删除键
+- `PUT /api/domain/characters` / `GET /api/domain/characters`：角色规范化表读写
+- `PUT /api/domain/chat/{character_id}` / `GET /api/domain/chat/{character_id}`：聊天消息规范化表读写
+- `PUT /api/domain/memories/{character_id}` / `GET /api/domain/memories/{character_id}`：记忆规范化表读写
 - `POST /api/memory/upsert`：写入记忆向量到 Qdrant
 - `POST /api/memory/search`：向量检索记忆
 - `GET /api/plugins`：列出插件

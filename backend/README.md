@@ -43,31 +43,3 @@ uvicorn app.main:app --reload --port 8000
 ## 5) Bluetooth 插件说明
 
 Bluetooth 执行基于 `bleak`，系统需具备蓝牙能力（常见于本机运行，不建议直接跑在无蓝牙容器中）。
-
-## 6) 常见问题：`permission denied for schema public`
-
-如果看到类似错误：
-
-```text
-psycopg2.errors.InsufficientPrivilege: permission denied for schema public
-```
-
-说明当前数据库用户没有 `public` schema 的建表权限。可用两种方式处理：
-
-### 方式 A（推荐，本地开发）：重建数据库卷后重启
-
-> 会清空本地 Postgres 数据。
-
-```bash
-cd backend
-docker compose down -v
-docker compose up -d --build
-```
-
-`docker-compose.yml` 已挂载 `initdb/01-grants.sql`，首次初始化会自动授予权限。
-
-### 方式 B（保留数据）：手动授予权限
-
-```bash
-docker exec -it rphub-postgres psql -U postgres -d rphub -c "GRANT USAGE, CREATE ON SCHEMA public TO rphub; ALTER SCHEMA public OWNER TO rphub;"
-```

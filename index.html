@@ -1829,6 +1829,32 @@
                                             </div>
                                         </div>
                                     </div>
+                                    <!-- Backend Service Status -->
+                                    <div
+                                        class="flex items-center p-3 bg-gray-50 rounded-xl border border-gray-100 hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all duration-200">
+                                        <div
+                                            :class="['w-2.5 h-2.5 rounded-full mr-3 shadow-sm flex-shrink-0',
+                                            backendStatus === 'connected' ? 'bg-green-500 shadow-green-200' :
+                                            (backendStatus === 'checking' ? 'bg-yellow-400 animate-pulse shadow-yellow-200' :
+                                            (backendStatus === 'local' ? 'bg-blue-500 shadow-blue-200' :
+                                            (backendStatus === 'error' ? 'bg-red-500 shadow-red-200' : 'bg-gray-300')))]">
+                                        </div>
+                                        <div class="flex-1 min-w-0">
+                                            <div class="flex justify-between items-center mb-0.5">
+                                                <div class="text-xs font-bold text-gray-700 truncate">后端服务</div>
+                                                <span v-if="backendStatus === 'connected'"
+                                                    class="text-[10px] font-mono text-teal-600 bg-teal-50 px-1.5 rounded">{{
+                                                    backendLatency }}ms</span>
+                                            </div>
+                                            <div class="text-[10px] text-gray-500 truncate">
+                                                <span v-if="backendStatus === 'connected'">正常</span>
+                                                <span v-else-if="backendStatus === 'checking'">检测中...</span>
+                                                <span v-else-if="backendStatus === 'local'">本地模式</span>
+                                                <span v-else-if="backendStatus === 'error'">连接失败</span>
+                                                <span v-else>未检测</span>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 

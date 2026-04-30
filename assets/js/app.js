@@ -314,6 +314,8 @@ createApp({
         const apiLatency = ref(0);
         const imageGenStatus = ref('unknown');
         const imageGenLatency = ref(0);
+        const backendStatus = ref('unknown'); // 'unknown', 'checking', 'connected', 'error', 'local'
+        const backendLatency = ref(0);
 
         const user = reactive({
             name: '请前往设置自定义你的名称',
@@ -2235,11 +2237,47 @@ ${rawHtml}
             }
         };
 
+        const checkBackendStatus = async () => {
+            if (settings.storageMode === 'local') {
+                backendStatus.value = 'local';
+                backendLatency.value = 0;
+                return;
+            }
+            if (!settings.backendApiUrl || !settings.backendApiUrl.trim()) {
+                backendStatus.value = 'error';
+                backendLatency.value = 0;
+                return;
+            }
+
+            backendStatus.value = 'checking';
+            try {
+                const startTime = performance.now();
+                const response = await apiRequest('/healthz', { method: 'GET' }, 5000);
+                const endTime = performance.now();
+                if (!response.ok) throw new Error(`Status ${response.status}`);
+                backendStatus.value = 'connected';
+                backendLatency.value = Math.round(endTime - startTime);
+            } catch (e) {
+                console.warn('Backend Status Check Failed:', e);
+                backendStatus.value = 'error';
+                backendLatency.value = 0;
+            }
+        };
+
         const checkAllStatuses = () => {
             checkApiStatus();
             checkImageGenStatus();
+            checkBackendStatus();
             fetchQuota();
         };
+
+        let _backendStatusTimer = null;
+        watch(() => [settings.backendApiUrl, settings.storageMode], () => {
+            clearTimeout(_backendStatusTimer);
+            _backendStatusTimer = setTimeout(() => {
+                checkBackendStatus();
+            }, 400);
+        });
 
         // Removed Personal Channel and Friends Logic
 
@@ -5674,7 +5712,7 @@ image###生成的提示词###
             editorTab, characterDisplayLimit, displayedCharacters, loadMoreCharacters,
             isAutoImageGenEnabled,
             isGeneratingSuggestions, suggestedReplies, generateSuggestions,
-            apiStatus, apiLatency, imageGenStatus, imageGenLatency, checkAllStatuses, // Status Exports
+            apiStatus, apiLatency, imageGenStatus, imageGenLatency, backendStatus, backendLatency, checkAllStatuses, checkBackendStatus, // Status Exports
             showQuotaPanel, quotaValue, quotaLoading, quotaError, quotaAvailable, fetchQuota, // Quota exports
             // Memory System Exports
             memories, memorySettings, showMemoryEditor, editingMemory, isExtractingMemory, isBatchExtracting, batchExtractProgress, memoryExtractStatus, memoryFilterCategory,

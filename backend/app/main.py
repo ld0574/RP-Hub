@@ -1,7 +1,11 @@
 """FastAPI 应用入口：初始化数据库、注册路由与基础中间件。"""
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .db import engine
@@ -50,3 +54,22 @@ def healthz():
 app.include_router(storage_router)
 app.include_router(memory_router)
 app.include_router(plugins_router)
+
+# 前端静态资源根目录（RP-Hub 项目根目录）
+FRONTEND_ROOT = Path(__file__).resolve().parents[2]
+
+# 仅暴露必要静态目录，避免将整个仓库公开为静态文件。
+app.mount("/assets", StaticFiles(directory=str(FRONTEND_ROOT / "assets")), name="assets")
+app.mount("/character", StaticFiles(directory=str(FRONTEND_ROOT / "character"), html=True), name="character")
+
+
+@app.get("/", include_in_schema=False)
+def frontend_index():
+    """返回前端首页。"""
+    return FileResponse(FRONTEND_ROOT / "index.html")
+
+
+@app.get("/index.html", include_in_schema=False)
+def frontend_index_alias():
+    """兼容直接访问 /index.html。"""
+    return FileResponse(FRONTEND_ROOT / "index.html")

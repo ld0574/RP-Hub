@@ -1,0 +1,10 @@
+# RP-Hub 后端依赖清单：FastAPI + PostgreSQL + Qdrant + 插件执行
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.10
+pydantic==2.10.3
+pydantic-settings==2.6.1
+qdrant-client==1.12.1
+httpx==0.28.1
+bleak==0.22.3

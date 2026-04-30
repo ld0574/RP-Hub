@@ -352,6 +352,9 @@ createApp({
             apiUrl: DEFAULT_API_CONFIG.apiUrl,
             apiKey: DEFAULT_API_CONFIG.apiKey,
             model: DEFAULT_API_CONFIG.qualityModel,
+            // 后端化存储配置：remote=强制后端，local=仅本地，auto=后端失败自动回退本地
+            storageMode: 'remote',
+            backendApiUrl: 'http://127.0.0.1:8000',
             contextSize: 800000,
             temperature: 1.0,
             autoFetchModels: true,
@@ -716,18 +719,84 @@ createApp({
         });
 
 
-        // --- Persistence (IndexedDB) ---
-        const dbName = 'SillyTavernDB';
-        const dbVersion = 1;
-        let db = null;
+        // --- Persistence (Backend API + IndexedDB Fallback) ---
+        // 说明：
+        // - remote：强制后端 PostgreSQL 存储
+        // - local：仅使用本地 IndexedDB
+        // - auto：优先后端，失败自动回退本地
+        const localDbName = 'SillyTavernDB';
+        const localDbVersion = 1;
+        let localDb = null;
+        const storageRuntime = reactive({
+            remoteAlive: false,
+            lastHealthCheck: 0,
+            fallbackNotified: false
+        });
 
-        const initDB = () => {
+        const normalizeBackendApiUrl = () => {
+            return (settings.backendApiUrl || '').trim().replace(/\/+$/, '');
+        };
+
+        const getStorageNamespace = () => {
+            // 使用稳定命名空间，避免“用户 UUID 尚未加载”导致读写错命名空间
+            return 'default';
+        };
+
+        const fetchWithTimeout = async (url, options = {}, timeout = 8000) => {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeout);
+            try {
+                return await fetch(url, { ...options, signal: controller.signal });
+            } finally {
+                clearTimeout(timer);
+            }
+        };
+
+        const apiRequest = async (path, init = {}, timeout = 8000) => {
+            const baseUrl = normalizeBackendApiUrl();
+            if (!baseUrl) throw new Error('未配置后端地址');
+            const headers = {
+                'X-RPH-User': getStorageNamespace(),
+                ...(init.headers || {})
+            };
+            if (init.body !== undefined && !headers['Content-Type']) {
+                headers['Content-Type'] = 'application/json';
+            }
+            return fetchWithTimeout(`${baseUrl}${path}`, {
+                ...init,
+                headers
+            }, timeout);
+        };
+
+        const checkRemoteStorage = async (force = false) => {
+            if (settings.storageMode === 'local') return false;
+            const now = Date.now();
+            if (!force && now - storageRuntime.lastHealthCheck < 10000) {
+                return storageRuntime.remoteAlive;
+            }
+            storageRuntime.lastHealthCheck = now;
+            try {
+                const response = await apiRequest('/healthz', { method: 'GET' }, 2500);
+                storageRuntime.remoteAlive = response.ok;
+            } catch (e) {
+                storageRuntime.remoteAlive = false;
+            }
+            return storageRuntime.remoteAlive;
+        };
+
+        const notifyStorageFallbackOnce = () => {
+            if (storageRuntime.fallbackNotified) return;
+            storageRuntime.fallbackNotified = true;
+            showToast('后端存储不可用，已自动回退到本地存储', 'warning', 4000);
+        };
+
+        const initLocalDB = () => {
             return new Promise((resolve, reject) => {
-                const request = indexedDB.open(dbName, dbVersion);
-                request.onerror = (event) => reject('DB Error: ' + event.target.error);
+                const request = indexedDB.open(localDbName, localDbVersion);
+                request.onerror = (event) => reject('Local DB Error: ' + event.target.error);
                 request.onsuccess = (event) => {
-                    db = event.target.result;
-                    resolve(db);
+                    localDb = event.target.result;
+                    resolve(localDb);
                 };
                 request.onupgradeneeded = (event) => {
                     const db = event.target.result;
@@ -738,22 +807,21 @@ createApp({
             });
         };
 
-        const dbSet = (key, value) => {
+        const localDbSet = (key, value) => {
             return new Promise((resolve, reject) => {
-                if (!db) return reject('DB not initialized');
-                const transaction = db.transaction(['store'], 'readwrite');
+                if (!localDb) return reject('Local DB not initialized');
+                const transaction = localDb.transaction(['store'], 'readwrite');
                 const store = transaction.objectStore('store');
-                // Clone to plain object to avoid Proxy issues
                 const request = store.put(JSON.parse(JSON.stringify(value)), key);
                 request.onsuccess = () => resolve();
                 request.onerror = (event) => reject(event.target.error);
             });
         };
 
-        const dbGet = (key) => {
+        const localDbGet = (key) => {
             return new Promise((resolve, reject) => {
-                if (!db) return reject('DB not initialized');
-                const transaction = db.transaction(['store'], 'readonly');
+                if (!localDb) return reject('Local DB not initialized');
+                const transaction = localDb.transaction(['store'], 'readonly');
                 const store = transaction.objectStore('store');
                 const request = store.get(key);
                 request.onsuccess = () => resolve(request.result);
@@ -761,9 +829,89 @@ createApp({
             });
         };
 
+        const localDbDelete = (key) => {
+            return new Promise((resolve, reject) => {
+                if (!localDb) return reject('Local DB not initialized');
+                const transaction = localDb.transaction(['store'], 'readwrite');
+                const store = transaction.objectStore('store');
+                const request = store.delete(key);
+                request.onsuccess = () => resolve();
+                request.onerror = (event) => reject(event.target.error);
+            });
+        };
+
+        const remoteDbSet = async (key, value) => {
+            const response = await apiRequest(`/api/storage/${encodeURIComponent(key)}`, {
+                method: 'PUT',
+                body: JSON.stringify({ value })
+            });
+            if (!response.ok) {
+                throw new Error(`Remote storage set failed: ${response.status}`);
+            }
+        };
+
+        const remoteDbGet = async (key) => {
+            const response = await apiRequest(`/api/storage/${encodeURIComponent(key)}`, { method: 'GET' });
+            if (!response.ok) {
+                throw new Error(`Remote storage get failed: ${response.status}`);
+            }
+            const data = await response.json();
+            return data.found ? data.value : undefined;
+        };
+
+        const remoteDbDelete = async (key) => {
+            const response = await apiRequest(`/api/storage/${encodeURIComponent(key)}`, { method: 'DELETE' });
+            if (!response.ok) {
+                throw new Error(`Remote storage delete failed: ${response.status}`);
+            }
+        };
+
+        const dbSet = async (key, value) => {
+            const plainValue = JSON.parse(JSON.stringify(value));
+            const shouldTryRemote = settings.storageMode !== 'local';
+
+            if (shouldTryRemote) {
+                try {
+                    await remoteDbSet(key, plainValue);
+                    storageRuntime.remoteAlive = true;
+                    storageRuntime.fallbackNotified = false;
+                    return;
+                } catch (e) {
+                    storageRuntime.remoteAlive = false;
+                    if (settings.storageMode === 'remote') throw e;
+                    notifyStorageFallbackOnce();
+                }
+            }
+
+            if (!localDb) await initLocalDB();
+            await localDbSet(key, plainValue);
+        };
+
+        const dbGet = async (key) => {
+            const shouldTryRemote = settings.storageMode !== 'local';
+
+            if (shouldTryRemote) {
+                try {
+                    const value = await remoteDbGet(key);
+                    storageRuntime.remoteAlive = true;
+                    storageRuntime.fallbackNotified = false;
+                    return value;
+                } catch (e) {
+                    storageRuntime.remoteAlive = false;
+                    if (settings.storageMode === 'remote') throw e;
+                    notifyStorageFallbackOnce();
+                }
+            }
+
+            if (!localDb) await initLocalDB();
+            return localDbGet(key);
+        };
+
         const saveData = async () => {
             try {
-                if (!db) await initDB();
+                if (settings.storageMode === 'auto') {
+                    await checkRemoteStorage();
+                }
                 await dbSet('silly_tavern_characters', characters.value);
                 await dbSet('silly_tavern_settings', settings);
                 await dbSet('silly_tavern_presets', presets.value);
@@ -796,19 +944,29 @@ createApp({
                 console.error('Save failed:', e);
                 if (e.name === 'QuotaExceededError') {
                     showToast('存储空间不足，无法保存', 'error');
+                } else if (settings.storageMode === 'remote') {
+                    showToast('后端存储失败: ' + (e.message || '未知错误'), 'error');
                 }
             }
         };
 
-        const dbDelete = (key) => {
-            return new Promise((resolve, reject) => {
-                if (!db) return reject('DB not initialized');
-                const transaction = db.transaction(['store'], 'readwrite');
-                const store = transaction.objectStore('store');
-                const request = store.delete(key);
-                request.onsuccess = () => resolve();
-                request.onerror = (event) => reject(event.target.error);
-            });
+        const dbDelete = async (key) => {
+            const shouldTryRemote = settings.storageMode !== 'local';
+            if (shouldTryRemote) {
+                try {
+                    await remoteDbDelete(key);
+                    storageRuntime.remoteAlive = true;
+                    storageRuntime.fallbackNotified = false;
+                    return;
+                } catch (e) {
+                    storageRuntime.remoteAlive = false;
+                    if (settings.storageMode === 'remote') throw e;
+                    notifyStorageFallbackOnce();
+                }
+            }
+
+            if (!localDb) await initLocalDB();
+            await localDbDelete(key);
         };
 
         /* extracted generateUUID */
@@ -822,12 +980,14 @@ createApp({
 
         const loadData = async () => {
             try {
-                await initDB();
+                if (settings.storageMode === 'auto') {
+                    await checkRemoteStorage(true);
+                }
 
                 // Migration: Check LocalStorage first
                 const localChar = localStorage.getItem('silly_tavern_characters');
                 if (localChar) {
-                    console.log('Migrating from LocalStorage to IndexedDB...');
+                    console.log('Migrating from LocalStorage to current storage backend...');
                     try {
                         characters.value = JSON.parse(localChar);
                         const localSettings = localStorage.getItem('silly_tavern_settings');
@@ -853,7 +1013,7 @@ createApp({
                         localStorage.removeItem('silly_tavern_regex');
                         localStorage.removeItem('silly_tavern_worldinfo');
                         localStorage.removeItem('silly_tavern_user');
-                        showToast('数据已迁移到 IndexedDB', 'success');
+                        showToast('数据已迁移到当前存储后端', 'success');
                         return;
                     } catch (e) {
                         console.error('Migration failed:', e);

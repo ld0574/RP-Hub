@@ -5,7 +5,7 @@
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-38B2AC?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
 [![DaisyUI](https://img.shields.io/badge/DaisyUI-5A0EF8?logo=daisyui&logoColor=white)](https://daisyui.com/)
 
-> **一款纯前端运行的本地角色扮演（Roleplay）对话和角色卡生成工具。**
+> **一款本地可运行的角色扮演（Roleplay）对话和角色卡生成工具（支持纯前端模式，也支持后端数据库模式）。**
 
 **【免责与授权声明】**  
 本项目基于 **[CC BY-NC 4.0（知识共享-署名-非商业性使用 4.0 国际许可协议）](./LICENSE)** 开源。**明确禁止任何形式的商业化使用（包括但不限于：作为收费服务提供、打包在付费产品中售卖、在产品内植入广告盈利等）。** 任何使用者必须遵守该协议，尊重原作者的署名权。对于违反协议的商业行为，保留追究法律责任的权利。
@@ -34,6 +34,21 @@ Roleplay Hub 致力于提供流畅、私密且功能强大的本地化AI Rolepla
 4. 在**角色管理**界面，导入您的角色卡文件（或点击新建角色并手动填写设定）。
 5. 回到对话界面，开始属于您的 Roleplay 旅程
 
+### 3. 启用后端数据库模式（可选）
+
+项目已内置 `backend/`（FastAPI + PostgreSQL + Qdrant + 插件执行接口）。
+
+```bash
+cd backend
+docker compose up -d --build
+```
+
+然后在前端 **设置** 中：
+1. 将 `存储模式` 切为 `后端数据库 (Remote)`（或 `自动回退 (Auto)`）。
+2. 将 `后端地址` 设为 `http://127.0.0.1:8000`。
+
+后端模式下，角色、聊天记录、记忆配置等主数据会写入数据库；记忆向量检索走 Qdrant。
+
 ---
 
 ## 目录结构 (Directory Structure)
@@ -49,6 +64,10 @@ Roleplay-Hub/
 │   └── js/
 │       ├── app.js        # 核心业务逻辑
 │       └── utils.js      # 工具函数库
+├── backend/              # 后端服务（FastAPI + PostgreSQL + Qdrant）
+│   ├── app/
+│   ├── requirements.txt
+│   └── docker-compose.yml
 └── README.md             # 本说明文件
 ```
 

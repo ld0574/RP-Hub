@@ -1871,6 +1871,29 @@
                                     </div>
                                 </div>
 
+                                <!-- Backend Storage Configuration -->
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mt-1">
+                                    <div class="group">
+                                        <label
+                                            class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">存储模式</label>
+                                        <select v-model="settings.storageMode"
+                                            class="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 text-gray-800 font-medium focus:bg-white focus:border-teal-500 focus:ring-4 focus:ring-teal-100 focus:outline-none transition-all text-sm">
+                                            <option value="remote">后端数据库 (Remote)</option>
+                                            <option value="auto">自动回退 (Auto)</option>
+                                            <option value="local">仅本地 IndexedDB (Local)</option>
+                                        </select>
+                                        <p class="text-[11px] text-gray-400 mt-1.5">推荐 Remote：主数据统一存 PostgreSQL</p>
+                                    </div>
+                                    <div class="group">
+                                        <label
+                                            class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">后端地址</label>
+                                        <input v-model="settings.backendApiUrl" type="text"
+                                            class="w-full bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 text-gray-800 font-medium focus:bg-white focus:border-teal-500 focus:ring-4 focus:ring-teal-100 focus:outline-none transition-all placeholder-gray-400 font-mono text-sm"
+                                            placeholder="http://127.0.0.1:8000">
+                                        <p class="text-[11px] text-gray-400 mt-1.5">用于存储 API、Qdrant 检索与插件调用</p>
+                                    </div>
+                                </div>
+
                                 <!-- Model Configuration Inputs -->
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mt-5">
                                     <div class="group">

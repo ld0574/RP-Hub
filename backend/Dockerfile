@@ -5,7 +5,8 @@ WORKDIR /app
 
 # 安装运行依赖
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+    && pip install --no-cache-dir -r /app/requirements.txt
 
 # 复制应用代码
 COPY app /app/app

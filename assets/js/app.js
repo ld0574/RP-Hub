@@ -59,6 +59,29 @@ createApp({
             suggestionModel: ''
         };
 
+        // --- Bootstrap Settings (LocalStorage) ---
+        // 作用：在“后端地址尚未从远端加载前”先恢复关键连接配置，避免刷新后连不上远端导致看起来“数据丢失”。
+        const BOOTSTRAP_SETTINGS_KEY = 'rphub_bootstrap_settings_v1';
+        const safeReadBootstrapSettings = () => {
+            try {
+                const raw = localStorage.getItem(BOOTSTRAP_SETTINGS_KEY);
+                if (!raw) return {};
+                const parsed = JSON.parse(raw);
+                if (!parsed || typeof parsed !== 'object') return {};
+                return parsed;
+            } catch (e) {
+                return {};
+            }
+        };
+        const safeWriteBootstrapSettings = (value) => {
+            try {
+                localStorage.setItem(BOOTSTRAP_SETTINGS_KEY, JSON.stringify(value));
+            } catch (e) {
+                // 忽略本地写入异常（如隐私模式）避免阻断主流程
+            }
+        };
+        const bootstrapSettings = safeReadBootstrapSettings();
+
         // --- State ---
         const globalConfirmModal = ref({
             show: false,
@@ -98,6 +121,7 @@ createApp({
         const showRegexEditor = ref(false);
         const showWorldInfoEditor = ref(false);
         const showUserSetupModal = ref(false);
+        const isLoadDataFailed = ref(false);
         const showAutoImageGenModal = ref(false);
         const tempUserSetup = reactive({ name: '', description: '', person: 'second' });
         const characterDisplayLimit = ref(20);
@@ -351,12 +375,12 @@ createApp({
         });
 
         const settings = reactive({
-            apiUrl: DEFAULT_API_CONFIG.apiUrl,
-            apiKey: DEFAULT_API_CONFIG.apiKey,
+            apiUrl: bootstrapSettings.apiUrl || DEFAULT_API_CONFIG.apiUrl,
+            apiKey: bootstrapSettings.apiKey || DEFAULT_API_CONFIG.apiKey,
             model: DEFAULT_API_CONFIG.qualityModel,
             // 后端化存储配置：remote=强制后端，local=仅本地，auto=后端失败自动回退本地
-            storageMode: 'remote',
-            backendApiUrl: 'http://127.0.0.1:8000',
+            storageMode: ['remote', 'auto', 'local'].includes(bootstrapSettings.storageMode) ? bootstrapSettings.storageMode : 'remote',
+            backendApiUrl: (bootstrapSettings.backendApiUrl || 'http://127.0.0.1:8000').trim(),
             contextSize: 800000,
             temperature: 1.0,
             autoFetchModels: true,
@@ -376,6 +400,20 @@ createApp({
             fastModel: DEFAULT_API_CONFIG.fastModel,
             suggestionModel: DEFAULT_API_CONFIG.suggestionModel
         });
+
+        // 关键连接配置本地引导持久化：保证刷新后先拿到正确后端地址/模式。
+        watch(
+            () => [settings.storageMode, settings.backendApiUrl, settings.apiUrl, settings.apiKey],
+            () => {
+                safeWriteBootstrapSettings({
+                    storageMode: settings.storageMode,
+                    backendApiUrl: settings.backendApiUrl,
+                    apiUrl: settings.apiUrl,
+                    apiKey: settings.apiKey
+                });
+            },
+            { deep: false }
+        );
 
         const syncSettingsToGenerator = () => {
             const iframe = document.querySelector('iframe[src*="character"]');
@@ -1147,6 +1185,7 @@ createApp({
         }, { deep: true });
 
         const loadData = async () => {
+            isLoadDataFailed.value = false;
             try {
                 if (settings.storageMode === 'auto') {
                     await checkRemoteStorage(true);
@@ -1272,7 +1311,11 @@ createApp({
 
             } catch (e) {
                 console.error('Failed to load saved data', e);
+                isLoadDataFailed.value = true;
                 showToast('加载保存的数据失败', 'error');
+                if (settings.storageMode === 'remote') {
+                    showToast(`请检查后端地址是否正确：${settings.backendApiUrl}`, 'warning', 4500);
+                }
             }
         };
 
@@ -5280,8 +5323,8 @@ image###生成的提示词###
                 presets.value.splice(defaultPresetIndex, 1);
             }
 
-            // Check for default username
-            if (user.name === '请前往设置自定义你的名称') {
+            // Check for default username（仅在历史数据成功加载后显示）
+            if (!isLoadDataFailed.value && user.name === '请前往设置自定义你的名称') {
                 tempUserSetup.name = '';
                 tempUserSetup.description = user.description;
                 tempUserSetup.person = user.person || 'second';
